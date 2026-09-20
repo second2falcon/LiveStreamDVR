@@ -1788,8 +1788,8 @@ export function GetHistory(req: express.Request, res: express.Response): void {
             }
         }
     } else {
-        // Fall back to building history from existing VOD chapters for imported channels
-        const vods = channel.getVods();
+        // Fall back to building history from the last 5 VODs' chapters for imported channels
+        const vods = channel.getVods().slice(-5);
         for (const vod of vods) {
             if (isTwitchChannel(channel) && vod instanceof TwitchVOD) {
                 for (const chapter of vod.chapters_raw) {
