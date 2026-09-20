@@ -1779,20 +1779,36 @@ export function GetHistory(req: express.Request, res: express.Response): void {
         BaseConfigCacheFolder.history,
         `${channel.internalName}.jsonline`
     );
-    if (!fs.existsSync(file)) {
-        res.api<ApiErrorResponse>(400, {
-            status: "ERROR",
-            message: req.t("route.channels.no-history-found"),
-        });
-        return;
-    }
-
-    const lines = fs.readFileSync(file, "utf8").split("\n");
-    for (const line of lines) {
-        if (line.length > 0) {
-            const chapter = JSON.parse(line) as HistoryEntry;
-            history.push(chapter);
+    if (fs.existsSync(file)) {
+        const lines = fs.readFileSync(file, "utf8").split("\n");
+        for (const line of lines) {
+            if (line.length > 0) {
+                const chapter = JSON.parse(line) as HistoryEntry;
+                history.push(chapter);
+            }
         }
+    } else {
+        // Fall back to building history from existing VOD chapters for imported channels
+        const vods = channel.getVods();
+        for (const vod of vods) {
+            if (isTwitchChannel(channel) && vod instanceof TwitchVOD) {
+                for (const chapter of vod.chapters_raw) {
+                    history.push(chapter);
+                }
+            }
+        }
+        if (history.length === 0) {
+            res.api<ApiErrorResponse>(400, {
+                status: "ERROR",
+                message: req.t("route.channels.no-history-found"),
+            });
+            return;
+        }
+        history.sort((a, b) => {
+            const aTime = (a as TwitchVODChapterJSON).started_at ?? (a as StreamEvent).time ?? "";
+            const bTime = (b as TwitchVODChapterJSON).started_at ?? (b as StreamEvent).time ?? "";
+            return aTime < bTime ? -1 : aTime > bTime ? 1 : 0;
+        });
     }
 
     res.api<ApiResponse>(200, {
