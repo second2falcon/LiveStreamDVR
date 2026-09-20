@@ -37,6 +37,9 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/livestreamdvr
+          tags: |
+            type=raw,value=develop
+            type=sha,prefix=,format=short
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
@@ -54,7 +57,7 @@ jobs:
             VITE_BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VITE_VERSION=${{ github.ref }}
             VITE_VCS_REF=${{ github.sha }}
-          tags: ghcr.io/${{ github.repository_owner }}/livestreamdvr:develop
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
