@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM node:20-bullseye-slim
+FROM node:24-bookworm-slim
 
 # make app folder
 RUN mkdir -p /usr/local/share/twitchautomator \
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y \
 # WORKDIR /usr/local/share/twitchautomator
 COPY ./Pipfile ./Pipfile.lock ./requirements.txt ./binaries.txt /usr/local/share/twitchautomator/
 # install pipenv globally
-RUN pip install pipenv && pip cache purge
+RUN pip install pipenv --break-system-packages && pip cache purge
 # switch to node user to install pipenv dependencies
 USER node 
 ENV PATH="${PATH}:/home/node/.local/bin"

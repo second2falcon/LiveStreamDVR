@@ -6,7 +6,7 @@ on:
     paths:
       - "server/**"
   pull_request:
-    branches: 
+    branches:
       - master
       - develop-ts
     paths:
@@ -17,16 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [19.x]
+        node-version: [24.x]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Node.js
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - run: npm install -g yarn    
+      - run: npm install -g yarn
       - name: yarn install, lint and build
-        run: | 
+        run: |
           cd ./server
           yarn install --immutable --immutable-cache
           yarn lint:ts
