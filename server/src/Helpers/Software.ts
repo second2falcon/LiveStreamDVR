@@ -27,7 +27,7 @@ export function DVRBinaries(): Record<string, BinaryDef> {
         },
         twitchdownloader: {
             binary: Helper.path_twitchdownloader(),
-            version_args: ["--version", "2>&1"],
+            version_args: ["--version"],
             version_regex: /TwitchDownloaderCLI (\d+\.\d+\.\d+)/m,
         },
         python: {

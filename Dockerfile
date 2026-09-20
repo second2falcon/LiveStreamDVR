@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg mediainfo \
     python3 python3-pip python3-wheel libxml2-dev libxslt-dev python3-dev \
     bash git curl unzip rclone \
+    libicu76 \
     && apt-get clean
 
 # copy over pipenv files and install dependencies for python
