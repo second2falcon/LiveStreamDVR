@@ -652,9 +652,6 @@ export class TwitchAutomator extends BaseAutomator {
     public providerArgs(): string[] {
         const cmd = [];
 
-        // disable channel hosting
-        cmd.push("--twitch-disable-hosting");
-
         if (
             fs.existsSync(
                 path.join(BaseConfigDataFolder.config, "twitch_oauth.txt")
@@ -674,14 +671,6 @@ export class TwitchAutomator extends BaseAutomator {
         if (Config.getInstance().cfg("low_latency", false)) {
             cmd.push("--twitch-low-latency");
         }
-
-        // Skip embedded advertisement segments at the beginning or during a stream
-        if (Config.getInstance().cfg("disable_ads", false)) {
-            cmd.push("--twitch-disable-ads");
-        }
-
-        // disable reruns
-        cmd.push("--twitch-disable-reruns");
 
         // one custom api header
         if (Config.getInstance().hasValue("capture.twitch-api-header")) {
