@@ -54,7 +54,7 @@ import { FFmpegMetadata } from "../../FFmpegMetadata";
 import { Helper } from "../../Helper";
 import { Job } from "../../Job";
 import { LiveStreamDVR } from "../../LiveStreamDVR";
-import { LOGLEVEL, censoredLogWords, log } from "../../Log";
+import { LOGLEVEL, log } from "../../Log";
 import { Webhook } from "../../Webhook";
 import { BaseVOD } from "../Base/BaseVOD";
 import { TwitchChannel } from "./TwitchChannel";
@@ -426,29 +426,22 @@ export class TwitchVOD extends BaseVOD {
              */
             if (Config.getInstance().cfg("twitch.voddownload.auth_enabled")) {
                 if (
-                    fs.existsSync(
+                    !fs.existsSync(
                         path.join(
                             BaseConfigDataFolder.config,
                             "twitch_oauth.txt"
                         )
                     )
                 ) {
-                    const token = fs
-                        .readFileSync(
-                            path.join(
-                                BaseConfigDataFolder.config,
-                                "twitch_oauth.txt"
-                            ),
-                            "utf8"
-                        )
-                        .trim();
-                    censoredLogWords.add(token.toString());
-                    cmd.push(
-                        `--twitch-api-header=Authorization=OAuth ${token}`
-                    );
-                } else {
                     throw new Error(
                         "Twitch OAuth token not found but auth_enabled is true!"
+                    );
+                }
+                // undefined = expired/invalid, already logged + notified; download unauthenticated
+                const token = await TwitchHelper.getSessionToken();
+                if (token) {
+                    cmd.push(
+                        `--twitch-api-header=Authorization=OAuth ${token}`
                     );
                 }
             }
