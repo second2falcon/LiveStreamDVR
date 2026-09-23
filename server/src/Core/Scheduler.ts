@@ -111,6 +111,11 @@ export class Scheduler {
             void TwitchHelper.validateOAuth();
         });
 
+        // warn about an expired twitch_oauth.txt before the next stream starts (notifies on failure)
+        this.schedule("validate_session_token", "30 */6 * * *", () => {
+            void TwitchHelper.getSessionToken();
+        });
+
         // refresh oauth token every 29 days
         // this.schedule("refresh_oauth", "0 0 */29 * *", () => {
         //     // if (Config.getInstance().cfg("twitchapi.auth_type") == "app") return;

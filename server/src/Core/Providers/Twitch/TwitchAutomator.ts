@@ -10,7 +10,7 @@ import { BaseConfigCacheFolder, BaseConfigDataFolder } from "../../BaseConfig";
 import { ClientBroker } from "../../ClientBroker";
 import { Config } from "../../Config";
 import { KeyValue } from "../../KeyValue";
-import { LOGLEVEL, censoredLogWords, log } from "../../Log";
+import { LOGLEVEL, log } from "../../Log";
 import { Webhook } from "../../Webhook";
 import { BaseAutomator } from "../Base/BaseAutomator";
 import { TwitchChannel } from "./TwitchChannel";
@@ -649,22 +649,21 @@ export class TwitchAutomator extends BaseAutomator {
         }
     }
 
+    private sessionToken?: string;
+
+    public async captureVideo(): Promise<boolean> {
+        // validate before streamlink runs, otherwise a bad token just shows up as "no playable streams"
+        this.sessionToken = await TwitchHelper.getSessionToken();
+        return super.captureVideo();
+    }
+
     public providerArgs(): string[] {
         const cmd = [];
 
-        if (
-            fs.existsSync(
-                path.join(BaseConfigDataFolder.config, "twitch_oauth.txt")
-            )
-        ) {
-            const token = fs
-                .readFileSync(
-                    path.join(BaseConfigDataFolder.config, "twitch_oauth.txt"),
-                    "utf8"
-                )
-                .trim();
-            censoredLogWords.add(token.toString());
-            cmd.push(`--twitch-api-header=Authorization=OAuth ${token}`);
+        if (this.sessionToken) {
+            cmd.push(
+                `--twitch-api-header=Authorization=OAuth ${this.sessionToken}`
+            );
         }
 
         // enable low latency mode, probably not a good idea without testing

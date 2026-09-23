@@ -1,4 +1,5 @@
 import { BaseConfigCacheFolder, BaseConfigDataFolder } from "@/Core/BaseConfig";
+import { ClientBroker } from "@/Core/ClientBroker";
 import { Config } from "@/Core/Config";
 import { Helper } from "@/Core/Helper";
 import { KeyValue } from "@/Core/KeyValue";
@@ -37,6 +38,7 @@ import type { Axios, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 import chalk from "chalk";
 import { format, parseJSON } from "date-fns";
+import { t } from "i18next";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -1503,6 +1505,58 @@ export class TwitchHelper {
             TwitchHelper.clearAccessToken();
             return false;
         }
+    }
+
+    /**
+     * Reads the streamlink session token from twitch_oauth.txt and validates it against Twitch.
+     * Separate from the app token (accessToken), don't mix them up.
+     * @returns the token if valid, undefined if missing or rejected by Twitch
+     */
+    public static async getSessionToken(): Promise<string | undefined> {
+        const file = path.join(BaseConfigDataFolder.config, "twitch_oauth.txt");
+        if (!fs.existsSync(file)) return undefined;
+
+        const token = fs.readFileSync(file, "utf8").trim();
+        if (!token) return undefined;
+        censoredLogWords.add(token);
+
+        try {
+            await axios.get<TwitchAuthTokenValidationResponse>(
+                "https://id.twitch.tv/oauth2/validate",
+                { headers: { Authorization: `OAuth ${token}` } }
+            );
+            return token;
+        } catch (error) {
+            // ponytail: only a 401 means the token is bad; network hiccups keep using it
+            if (
+                !axios.isAxiosError(error) ||
+                error.response?.status !== 401
+            ) {
+                log(
+                    LOGLEVEL.WARNING,
+                    "tw.helper.getSessionToken",
+                    `Could not validate twitch_oauth.txt, using it anyway: ${
+                        (error as Error).message
+                    }`
+                );
+                return token;
+            }
+        }
+
+        log(
+            LOGLEVEL.ERROR,
+            "tw.helper.getSessionToken",
+            "Twitch session token in twitch_oauth.txt is expired or invalid, capturing without it (no ad-skip / sub-only access). Replace it with a fresh auth-token cookie."
+        );
+        ClientBroker.notify(
+            "Twitch token invalid",
+            t(
+                "notify.twitch-oauth-token-expired-or-invalid-check-config-twitch-oauth-txt"
+            ).toString(),
+            "",
+            "system"
+        );
+        return undefined;
     }
 
     public static async checkTTVLolPlugin() {
