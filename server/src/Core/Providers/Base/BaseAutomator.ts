@@ -2145,10 +2145,10 @@ export class BaseAutomator {
 
             // attach output to parsing
             captureProcess.stdout.on("data", (data) => {
-                this.captureTicker("stdout", data);
+                this.captureTicker("stdout", data.toString());
             });
             captureProcess.stderr.on("data", (data) => {
-                this.captureTicker("stderr", data);
+                this.captureTicker("stderr", data.toString());
             });
 
             // check for errors
