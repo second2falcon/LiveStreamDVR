@@ -15,6 +15,16 @@ import path from "node:path";
 import { progressOutput } from "./Console";
 import { exec, execSimple, isExecError, startJob } from "./Execute";
 import { formatDuration } from "./Format";
+import type { PadPlan } from "./PadVideo";
+import {
+    PacketScanner,
+    buildConcatList,
+    fillerUnitFrames,
+    planPadding,
+} from "./PadVideo";
+import type { PauseInterval } from "./StreamPauses";
+import { spawn } from "node:child_process";
+import readline from "node:readline";
 
 export interface RemuxReturn {
     stdout: string[];
@@ -36,7 +46,9 @@ export async function remuxFile(
     input: string,
     output: string,
     overwrite = false,
-    metadata_file?: string
+    metadata_file?: string,
+    /** options placed before the input, e.g. the input format */
+    input_options: string[] = []
 ): Promise<RemuxReturn> {
     const ffmpegPath = Helper.path_ffmpeg();
 
@@ -64,6 +76,7 @@ export async function remuxFile(
     const opts: string[] = [];
     // "-r", parseInt(info.video.FrameRate).toString(),
     // "-vsync", "cfr",
+    opts.push(...input_options);
     opts.push("-i", input);
 
     // write metadata to file
@@ -617,6 +630,216 @@ export async function ffprobe(filename: string): Promise<FFProbe> {
             `No output from ffprobe for ${filename}`
         );
         throw new Error("No output from ffprobe");
+    }
+}
+
+function parseFrameRate(rate?: string): number | undefined {
+    if (!rate) return undefined;
+    const [num, den] = rate.split("/").map((v) => parseFloat(v));
+    const fps = den ? num / den : num;
+    return fps > 0 && isFinite(fps) ? fps : undefined;
+}
+
+/**
+ * Scan the timestamps of all video packets in a file, streaming the ffprobe output.
+ */
+function scanVideoPackets(
+    ffprobePath: string,
+    input: string,
+    frameDuration?: number
+): Promise<ReturnType<PacketScanner["result"]>> {
+    return new Promise((resolve, reject) => {
+        const scanner = new PacketScanner(frameDuration);
+        const proc = spawn(ffprobePath, [
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "packet=pts_time,dts_time,flags",
+            "-of",
+            "csv=p=0",
+            input,
+        ]);
+        const stderr: string[] = [];
+        proc.stderr.on("data", (data: Buffer) => stderr.push(data.toString()));
+        const lines = readline.createInterface({ input: proc.stdout });
+        lines.on("line", (line) => scanner.addLine(line));
+        proc.on("error", reject);
+        proc.on("close", (code) => {
+            if (code !== 0) {
+                reject(
+                    new Error(
+                        `ffprobe packet scan failed (${code}): ${stderr
+                            .join("")
+                            .slice(0, 500)}`
+                    )
+                );
+                return;
+            }
+            resolve(scanner.result());
+        });
+    });
+}
+
+/**
+ * Remux a capture, filling the stream pauses (ad breaks) with black, silent video
+ * so the video length matches the stream and chat/chapters stay in sync.
+ *
+ * The capture itself is only stream copied, just the short filler unit is encoded.
+ * Throws if the capture can't be padded, the caller should fall back to {@link remuxFile}.
+ *
+ * @param intervals stream pauses in seconds since the stream started
+ */
+export async function remuxFileWithPadding(
+    input: string,
+    output: string,
+    intervals: PauseInterval[],
+    metadata_file?: string
+): Promise<RemuxReturn & { plan: PadPlan }> {
+    const ffmpegPath = Helper.path_ffmpeg();
+    const ffprobePath = Helper.path_ffprobe();
+    if (!ffmpegPath) throw new Error("Failed to find ffmpeg");
+    if (!ffprobePath || !fs.existsSync(ffprobePath)) {
+        throw new Error("Failed to find ffprobe");
+    }
+
+    const probe = await ffprobe(input);
+    const video = probe.streams.find((s) => s.codec_type == "video");
+    const audio = probe.streams.find((s) => s.codec_type == "audio");
+    if (!video || video.codec_type != "video" || video.codec_name != "h264") {
+        throw new Error("Padding needs an h264 video stream");
+    }
+    if (!audio || audio.codec_type != "audio" || audio.codec_name != "aac") {
+        throw new Error("Padding needs an aac audio stream");
+    }
+
+    const fps =
+        parseFrameRate(video.r_frame_rate) ||
+        parseFrameRate(video.avg_frame_rate);
+    const sampleRate = Number(audio.sample_rate);
+    if (!fps || !sampleRate || !video.width || !video.height) {
+        throw new Error(
+            "Could not determine video/audio parameters for padding"
+        );
+    }
+
+    log(
+        LOGLEVEL.INFO,
+        "video.remuxPadded",
+        `Scanning video timestamps of ${input}`
+    );
+    progressOutput(`🎞 Scanning ${path.basename(input)} for ad breaks`);
+
+    const scan = await scanVideoPackets(ffprobePath, input, 1 / fps);
+    if (!scan) throw new Error("No video packets found");
+
+    const plan = planPadding(scan, intervals);
+    for (const message of plan.messages) {
+        log(LOGLEVEL.INFO, "video.remuxPadded", message);
+    }
+    log(
+        LOGLEVEL.INFO,
+        "video.remuxPadded",
+        `Padding plan for ${path.basename(input)}: ${
+            plan.matchedPauses
+        } pauses at timestamp gaps, ` +
+            `${plan.estimatedPauses} estimated, ${plan.collapsedGaps} gaps collapsed, ` +
+            `${plan.totalFiller.toFixed(1)}s filler in ${
+                plan.parts.length
+            } parts`
+    );
+
+    if (plan.totalFiller < 1) throw new Error("Nothing to pad");
+
+    // encode one filler unit matching the capture, it's repeated for the whole pause
+    const unitFrames = fillerUnitFrames(fps, sampleRate);
+    const unitSeconds = unitFrames / fps;
+    const workBase = path.join(
+        BaseConfigCacheFolder.cache,
+        `pad_${path.basename(input, path.extname(input))}`
+    );
+    const fillerFile = `${workBase}_filler.ts`;
+    const listFile = `${workBase}.ffconcat`;
+
+    const profile = (video.profile || "").toLowerCase();
+    const x264Profile = profile.includes("baseline")
+        ? "baseline"
+        : profile == "main"
+        ? "main"
+        : "high";
+
+    try {
+        await execSimple(
+            ffmpegPath,
+            [
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                `color=c=black:s=${video.width}x${video.height}:r=${
+                    video.r_frame_rate || fps
+                }`,
+                "-f",
+                "lavfi",
+                "-i",
+                `anullsrc=r=${sampleRate}:cl=${
+                    audio.channel_layout ||
+                    (audio.channels == 1 ? "mono" : "stereo")
+                }`,
+                "-frames:v",
+                unitFrames.toString(),
+                "-t",
+                unitSeconds.toFixed(6),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-profile:v",
+                x264Profile,
+                "-pix_fmt",
+                video.pix_fmt || "yuv420p",
+                "-bf",
+                "0",
+                "-g",
+                unitFrames.toString(),
+                "-c:a",
+                "aac",
+                "-ar",
+                sampleRate.toString(),
+                "-ac",
+                (audio.channels || 2).toString(),
+                "-f",
+                "mpegts",
+                fillerFile,
+            ],
+            "pad filler"
+        );
+
+        if (!fs.existsSync(fillerFile) || fs.statSync(fillerFile).size == 0) {
+            throw new Error("Failed to encode filler");
+        }
+
+        const fillerProbe = await ffprobe(fillerFile);
+        const fillerStart = parseFloat(fillerProbe.format.start_time) || 0;
+
+        fs.writeFileSync(
+            listFile,
+            buildConcatList(plan, input, fillerFile, fillerStart, unitSeconds)
+        );
+
+        const result = await remuxFile(listFile, output, false, metadata_file, [
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+        ]);
+
+        return { ...result, plan };
+    } finally {
+        for (const file of [fillerFile, listFile]) {
+            if (fs.existsSync(file)) fs.unlinkSync(file);
+        }
     }
 }
 

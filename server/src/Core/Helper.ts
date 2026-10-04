@@ -276,7 +276,11 @@ export class Helper {
     public static path_ffprobe(): string | false {
         const f = this.path_ffmpeg();
         if (!f) return false;
-        return f.replace("ffmpeg.exe", "ffprobe.exe");
+        // ffprobe is next to ffmpeg, replace only the file name (ffmpeg or ffmpeg.exe)
+        return path.join(
+            path.dirname(f),
+            path.basename(f).replace(/^ffmpeg/i, "ffprobe")
+        );
     }
 
     public static python_scripts_dir_name(): string {

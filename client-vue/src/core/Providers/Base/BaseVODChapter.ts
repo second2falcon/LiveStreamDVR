@@ -8,8 +8,14 @@ export class BaseVODChapter {
      */
     public started_at!: Date;
 
+    /** Seconds since the stream started */
     public offset?: number;
     public duration?: number;
+
+    /** Position in the captured video, corrected for stream pauses (ad breaks) */
+    public video_offset?: number;
+    /** Duration in the captured video, corrected for stream pauses (ad breaks) */
+    public video_duration?: number;
 
     // public game_id?: string;
     // public game?: TwitchGame;
@@ -34,6 +40,8 @@ export class BaseVODChapter {
         chapter.started_at = new Date(apiResponse.started_at);
         chapter.offset = apiResponse.offset;
         chapter.duration = apiResponse.duration;
+        chapter.video_offset = apiResponse.video_offset ?? apiResponse.offset;
+        chapter.video_duration = apiResponse.video_duration ?? apiResponse.duration;
         // chapter.strings = apiResponse.strings;
         // chapter.game_id = apiResponse.game_id;
         chapter.title = apiResponse.title;

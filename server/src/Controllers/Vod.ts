@@ -392,7 +392,8 @@ export async function RenderWizard(
                 chat_font,
                 chat_font_size,
                 chat_source == "downloaded",
-                true
+                true,
+                vod_source != "downloaded"
             );
         } catch (error) {
             res.api(400, {
@@ -700,9 +701,10 @@ export async function CutVod(
     }
 
     if (vod.is_chat_downloaded || vod.is_chatdump_captured) {
+        // the clip is cut from the captured video, so use the chat dump synced to it
         const chat_file_in = vod.is_chat_downloaded
             ? vod.path_chat
-            : vod.path_chatdump;
+            : await vod.getChatdumpForVideo();
         const chat_file_out = path.join(
             BaseConfigDataFolder.saved_clips,
             `${vod.basename}_${time_in}-${time_out}_${segment_name}_chat.json`
@@ -894,6 +896,40 @@ export async function GetSync(
         data,
     });
     */
+}
+
+/**
+ * Send the captured chat dump timed to the captured video.
+ * Stream pauses (ad breaks) are cut out of the video, so the chat is synced to match.
+ * Sends the original chat dump if no sync is needed.
+ */
+export async function GetVideoChatdump(
+    req: express.Request,
+    res: express.Response
+): Promise<void> {
+    const vod = LiveStreamDVR.getInstance().getVodByUUID(req.params.uuid);
+
+    if (!vod) {
+        res.api(400, {
+            status: "ERROR",
+            message: "Vod not found",
+        } as ApiErrorResponse);
+        return;
+    }
+
+    if (!vod.is_chatdump_captured) {
+        res.api(404, {
+            status: "ERROR",
+            message: "No chat dump captured for this vod",
+        } as ApiErrorResponse);
+        return;
+    }
+
+    const chatdump = await vod.getChatdumpForVideo();
+
+    res.sendFile(chatdump, {
+        headers: { "Content-Type": "application/json" },
+    });
 }
 
 export async function RenameVod(

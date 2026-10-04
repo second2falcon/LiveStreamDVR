@@ -58,6 +58,8 @@ export interface VODJSON {
     viewers?: { timestamp: string; amount: number }[];
     // stream_pauses?: StreamPause[];
     stream_pauses?: { start?: string; end?: string }[];
+    /** The stream pauses were filled with black video during conversion */
+    stream_pauses_padded?: boolean;
 
     bookmarks: VODBookmark[];
 

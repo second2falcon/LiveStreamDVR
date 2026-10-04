@@ -7,7 +7,8 @@ import { Sleep } from "@/Helpers/Sleep";
 import { xClearInterval, xInterval } from "@/Helpers/Timeout";
 import { isTwitchVOD, isTwitchVODChapter } from "@/Helpers/Types";
 import type { RemuxReturn } from "@/Helpers/Video";
-import { remuxFile } from "@/Helpers/Video";
+import { pausesToIntervals, totalPauseDuration } from "@/Helpers/StreamPauses";
+import { remuxFile, remuxFileWithPadding } from "@/Helpers/Video";
 import type { TwitchVODChapterJSON } from "@/Storage/JSON";
 import type { VideoQuality } from "@common/Config";
 import type { NotificationCategory } from "@common/Defs";
@@ -1957,7 +1958,8 @@ export class BaseAutomator {
                 settings.chatFont,
                 settings.chatFontSize,
                 settings.chatSource == "downloaded",
-                true
+                true,
+                settings.vodSource != "downloaded"
             );
         } catch (error) {
             log(LOGLEVEL.ERROR, "automator.burnChat", (error as Error).message);
@@ -2252,6 +2254,21 @@ export class BaseAutomator {
         return false;
     }
 
+    /**
+     * Save the chapters for embedding in the converted video.
+     * @returns path to the chapters metadata file, if enabled
+     */
+    private async saveChaptersForConvert(): Promise<string | undefined> {
+        if (!this.vod) return undefined;
+        if (
+            Config.getInstance().cfg("create_video_chapters") &&
+            (await this.vod.saveFFMPEGChapters())
+        ) {
+            return this.vod.path_ffmpegchapters;
+        }
+        return undefined;
+    }
+
     private async convertVideo(): Promise<boolean> {
         if (!this.vod) throw new Error("VOD not set");
 
@@ -2259,23 +2276,68 @@ export class BaseAutomator {
             vod: await this.vod.toAPI(),
         } as VodUpdated);
 
-        let mf;
-        if (
-            Config.getInstance().cfg("create_video_chapters") &&
-            (await this.vod.saveFFMPEGChapters())
-        ) {
-            mf = this.vod.path_ffmpegchapters;
+        let result: RemuxReturn | undefined;
+
+        // fill stream pauses (ad breaks) with black video so chat and chapters stay in sync
+        const pauseIntervals =
+            this.vod.started_at &&
+            Config.getInstance().cfg<boolean>("video.pad_stream_pauses", false)
+                ? pausesToIntervals(this.vod.stream_pauses, this.vod.started_at)
+                : [];
+
+        if (pauseIntervals.length > 0) {
+            log(
+                LOGLEVEL.INFO,
+                "automator.convertVideo",
+                `Filling ${pauseIntervals.length} stream pauses (${Math.round(
+                    totalPauseDuration(pauseIntervals)
+                )}s) of ${this.vod.basename} with black video`
+            );
+
+            // chapters in the padded video are at their stream time
+            this.vod.stream_pauses_padded = true;
+            this.vod.calculateChapters();
+
+            try {
+                result = await remuxFileWithPadding(
+                    this.capture_filename,
+                    this.converted_filename,
+                    pauseIntervals,
+                    await this.saveChaptersForConvert()
+                );
+            } catch (err) {
+                log(
+                    LOGLEVEL.ERROR,
+                    "automator.convertVideo",
+                    `Failed to fill stream pauses, converting normally: ${
+                        (err as Error).message
+                    }`,
+                    err
+                );
+                result = undefined;
+            }
+
+            if (!result || !result.success) {
+                this.vod.stream_pauses_padded = false;
+                this.vod.calculateChapters();
+                if (fs.existsSync(this.converted_filename)) {
+                    fs.unlinkSync(this.converted_filename);
+                }
+                result = undefined;
+            }
+
+            await this.vod.saveJSON("stream pauses padded");
         }
 
-        let result: RemuxReturn;
-
         try {
-            result = await remuxFile(
-                this.capture_filename,
-                this.converted_filename,
-                false,
-                mf
-            );
+            if (!result) {
+                result = await remuxFile(
+                    this.capture_filename,
+                    this.converted_filename,
+                    false,
+                    await this.saveChaptersForConvert()
+                );
+            }
         } catch (err) {
             log(
                 LOGLEVEL.ERROR,

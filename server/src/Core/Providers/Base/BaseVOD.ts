@@ -1,6 +1,13 @@
 import { debugLog } from "@/Helpers/Console";
 import { exec, isExecError, startJob } from "@/Helpers/Execute";
 import { formatBytes } from "@/Helpers/Format";
+import type { PauseInterval } from "@/Helpers/StreamPauses";
+import {
+    pausesToIntervals,
+    streamTimeToVideoTime,
+    syncChatDumpToVideo,
+    totalPauseDuration,
+} from "@/Helpers/StreamPauses";
 import { xClearTimeout, xTimeout } from "@/Helpers/Timeout";
 import { isTwitchVOD, isTwitchVODChapter } from "@/Helpers/Types";
 import {
@@ -11,6 +18,7 @@ import {
 } from "@/Helpers/Video";
 import type { BaseVODChapterJSON, VODJSON } from "@/Storage/JSON";
 import type { ApiBaseVod } from "@common/Api/Client";
+import type { TwitchCommentDumpTD } from "@common/Comments";
 import type { VODBookmark } from "@common/Bookmark";
 import type { VideoQuality } from "@common/Config";
 import type { Providers } from "@common/Defs";
@@ -124,6 +132,8 @@ export class BaseVOD {
     public path_chatmask = "";
     public path_chatburn = "";
     public path_chatdump = "";
+    /** Chat dump with offsets mapped to the captured video, see {@link syncChatdumpToVideo} */
+    public path_chatdump_synced = "";
     // path_adbreak = "";
     public path_playlist = "";
     public path_ffmpegchapters = "";
@@ -156,6 +166,12 @@ export class BaseVOD {
     public viewers: VodViewerEntry[] = [];
 
     public stream_pauses: StreamPause[] = [];
+
+    /**
+     * The stream pauses were filled with black video during conversion,
+     * so the captured video already matches the stream time.
+     */
+    public stream_pauses_padded = false;
 
     public bookmarks: Array<VODBookmark> = [];
 
@@ -194,6 +210,9 @@ export class BaseVOD {
 
             /** Live chat dump */
             `${this.basename}.chatdump`,
+
+            /** Live chat dump synced to the captured video */
+            `${this.basename}.synced.chatdump`,
 
             /** in-progress chat dump */
             `${this.basename}.chatdump.txt`,
@@ -251,6 +270,112 @@ export class BaseVOD {
 
     public get is_chatdump_captured(): boolean {
         return this.path_chatdump !== "" && fs.existsSync(this.path_chatdump);
+    }
+
+    /**
+     * Stream pauses (ad breaks) that were cut out of the captured video,
+     * as intervals in seconds since the stream started.
+     *
+     * Empty if there were no pauses or they were padded during conversion,
+     * meaning chat and chapter times already match the captured video.
+     */
+    public get pauseIntervals(): PauseInterval[] {
+        if (this.stream_pauses_padded || !this.started_at) return [];
+        return pausesToIntervals(this.stream_pauses, this.started_at);
+    }
+
+    /**
+     * Chat and chapter times need to be mapped to the captured video.
+     */
+    public get needs_video_sync(): boolean {
+        return this.pauseIntervals.length > 0;
+    }
+
+    /**
+     * Map seconds since the stream started to seconds in the captured video.
+     */
+    public streamTimeToVideoTime(seconds: number): number {
+        return streamTimeToVideoTime(seconds, this.pauseIntervals);
+    }
+
+    /**
+     * Write a copy of the chat dump with offsets mapped to the captured video.
+     * Does nothing if no sync is needed or the synced file is up to date, unless forced.
+     * @returns path to the synced chat dump, or false if no sync is needed or possible
+     */
+    public async syncChatdumpToVideo(force = false): Promise<string | false> {
+        if (!this.is_chatdump_captured || !this.path_chatdump_synced) {
+            return false;
+        }
+
+        const intervals = this.pauseIntervals;
+
+        if (intervals.length == 0) {
+            // remove a synced file left over from before the vod was padded
+            if (fs.existsSync(this.path_chatdump_synced)) {
+                fs.unlinkSync(this.path_chatdump_synced);
+            }
+            return false;
+        }
+
+        if (
+            !force &&
+            fs.existsSync(this.path_chatdump_synced) &&
+            fs.statSync(this.path_chatdump_synced).mtimeMs >=
+                fs.statSync(this.path_chatdump).mtimeMs
+        ) {
+            return this.path_chatdump_synced;
+        }
+
+        log(
+            LOGLEVEL.INFO,
+            "vod.syncChatdumpToVideo",
+            `Syncing chat dump of ${this.basename} to video, removing ${
+                intervals.length
+            } stream pauses (${Math.round(totalPauseDuration(intervals))}s)`
+        );
+
+        const dump: TwitchCommentDumpTD = JSON.parse(
+            await fs.promises.readFile(this.path_chatdump, "utf8")
+        );
+
+        if (!dump || !Array.isArray(dump.comments)) {
+            log(
+                LOGLEVEL.ERROR,
+                "vod.syncChatdumpToVideo",
+                `Chat dump of ${this.basename} has no comments array`
+            );
+            return false;
+        }
+
+        const synced = syncChatDumpToVideo(dump, intervals);
+
+        // write to a temp file first so a half-written file is never served
+        const tempPath = `${this.path_chatdump_synced}.tmp`;
+        await fs.promises.writeFile(tempPath, JSON.stringify(synced));
+        await fs.promises.rename(tempPath, this.path_chatdump_synced);
+
+        return this.path_chatdump_synced;
+    }
+
+    /**
+     * The chat dump to use together with the captured video,
+     * synced to the video if needed.
+     */
+    public async getChatdumpForVideo(): Promise<string> {
+        try {
+            const synced = await this.syncChatdumpToVideo();
+            if (synced) return synced;
+        } catch (error) {
+            log(
+                LOGLEVEL.ERROR,
+                "vod.getChatdumpForVideo",
+                `Failed to sync chat dump of ${
+                    this.basename
+                } to video, using the original: ${(error as Error).message}`
+            );
+        }
+        return this.path_chatdump;
     }
 
     public get is_chat_rendered(): boolean {
@@ -626,6 +751,8 @@ export class BaseVOD {
                     end: v.end.toISOString(),
                 };
             }),
+            stream_pauses_padded: this.stream_pauses_padded,
+            needs_video_sync: this.needs_video_sync,
 
             api_getDuration: await this.getDuration(true),
             api_getRecordingSize: this.getRecordingSize(),
@@ -696,6 +823,7 @@ export class BaseVOD {
                 ? [{ start: pause.start.toJSON(), end: pause.end.toJSON() }]
                 : [];
         });
+        generated.stream_pauses_padded = this.stream_pauses_padded;
 
         generated.external_vod_exists = this.external_vod_exists;
         generated.external_vod_id = this.external_vod_id;
@@ -836,7 +964,9 @@ export class BaseVOD {
         font: string,
         font_size: number,
         use_downloaded: boolean,
-        overwrite: boolean
+        overwrite: boolean,
+        /** Sync the captured chat to the captured video, disable when burning onto the downloaded vod */
+        sync_to_video = true
     ): Promise<boolean> {
         if (use_downloaded && !this.is_chat_downloaded) {
             console.error(chalk.redBright("No chat downloaded"));
@@ -892,10 +1022,14 @@ export class BaseVOD {
         args.push("chatrender");
         args.push("--temp-path", BaseConfigCacheFolder.cache);
         args.push("--ffmpeg-path", ffmpegBin);
-        args.push(
-            "--input",
-            path.normalize(use_downloaded ? this.path_chat : this.path_chatdump)
-        );
+        let chatInput = this.path_chat;
+        if (!use_downloaded) {
+            chatInput = sync_to_video
+                ? await this.getChatdumpForVideo()
+                : this.path_chatdump;
+        }
+
+        args.push("--input", path.normalize(chatInput));
         args.push(
             "--chat-height",
             (chat_height ? chat_height : this.video_metadata.height).toString()
@@ -1465,6 +1599,8 @@ export class BaseVOD {
 
         // console.debug(`Calculating chapters for ${this.basename}, ${this.chapters.length} chapters`);
 
+        const pauseIntervals = this.pauseIntervals;
+
         this.chapters.forEach((chapter, index) => {
             if (!this.started_at) return; // thanks scoping
 
@@ -1475,7 +1611,8 @@ export class BaseVOD {
             chapter.calculateDurationAndOffset(
                 this.started_at,
                 this.ended_at,
-                nextChapter ? nextChapter.started_at : undefined
+                nextChapter ? nextChapter.started_at : undefined,
+                pauseIntervals
             );
         });
 
@@ -1518,8 +1655,9 @@ export class BaseVOD {
         const titleConfig = Config.getInstance().cfg("video.chapters.title");
 
         this.chapters.forEach((chapter) => {
-            const offset = chapter.offset || 0;
-            const duration = chapter.duration || 0;
+            // position in the captured video, corrected for stream pauses
+            const offset = chapter.video_offset ?? chapter.offset ?? 0;
+            const duration = chapter.video_duration ?? chapter.duration ?? 0;
             const start = Math.floor(offset * 1000);
             const end = Math.floor((offset + duration) * 1000);
             // const title = isTwitchVODChapter(chapter)
@@ -1855,6 +1993,9 @@ export class BaseVOD {
         this.path_chatdump = this.realpath(
             path.join(this.directory, `${this.basename}.chatdump`)
         );
+        this.path_chatdump_synced = this.realpath(
+            path.join(this.directory, `${this.basename}.synced.chatdump`)
+        );
         // this.path_adbreak = this.realpath(path.join(this.directory, `${this.basename}.adbreak`));
         this.path_playlist = this.realpath(
             path.join(this.directory, `${this.basename}.m3u8`)
@@ -1924,16 +2065,21 @@ export class BaseVOD {
         let data = "";
 
         this.chapters.forEach((chapter, i) => {
-            let offset = chapter.offset;
+            // position in the captured video, corrected for stream pauses
+            let offset = chapter.video_offset ?? chapter.offset;
             if (offset === undefined) return;
 
-            offset -= this.chapters[0].offset || 0;
+            offset -=
+                this.chapters[0].video_offset ?? this.chapters[0].offset ?? 0;
 
             data += offset + ","; // offset
 
             if (i < this.chapters.length - 1) {
                 // not last chapter
-                data += offset + (chapter.duration || 0) + ",";
+                data +=
+                    offset +
+                    (chapter.video_duration ?? chapter.duration ?? 0) +
+                    ",";
             } else {
                 // last chapter
                 data += ",";
@@ -2306,6 +2452,8 @@ export class BaseVOD {
                         : [];
                 });
         }
+
+        this.stream_pauses_padded = this.json.stream_pauses_padded ?? false;
 
         this.external_vod_id = this.json.external_vod_id;
         this.external_vod_title = this.json.external_vod_title;

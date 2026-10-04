@@ -138,6 +138,8 @@ export const MockApiVODData: ApiTwitchVod = {
     channel_uuid: "",
     viewers: [],
     stream_pauses: [],
+    stream_pauses_padded: false,
+    needs_video_sync: false,
 };
 
 export const MockApiChapterData: ApiVodTwitchChapter = {
@@ -146,6 +148,8 @@ export const MockApiChapterData: ApiVodTwitchChapter = {
     duration: 0,
     started_at: "",
     offset: 0,
+    video_offset: 0,
+    video_duration: 0,
     is_mature: false,
     game_id: undefined,
     game_name: undefined,

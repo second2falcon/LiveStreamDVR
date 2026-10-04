@@ -93,6 +93,8 @@ export class TwitchVODChapter extends BaseVODChapter {
 
             offset: this.offset || 0,
             duration: this.duration || 0,
+            video_offset: this.video_offset ?? this.offset ?? 0,
+            video_duration: this.video_duration ?? this.duration ?? 0,
 
             started_at: this.started_at.toISOString(),
 

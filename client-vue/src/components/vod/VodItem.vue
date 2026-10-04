@@ -451,13 +451,22 @@ function openPlayer(): void {
         hash += `&video_path=${props.vod.webpath}/${props.vod.basename}_vod.mp4`;
     }
 
+    // stream pauses are cut out of the captured video, chat and chapters need to be synced to it
+    const syncToVideo = playerSettings.value.vodSource == "captured" && props.vod.needs_video_sync;
+
     if (playerSettings.value.chatSource == "captured") {
-        hash += `&chatfile=${props.vod.webpath}/${props.vod.basename}.chatdump`;
+        if (syncToVideo) {
+            hash += `&chatfile=${store.cfg<string>("basepath", "")}/api/v0/vod/${props.vod.uuid}/synced.chatdump`;
+        } else {
+            hash += `&chatfile=${props.vod.webpath}/${props.vod.basename}.chatdump`;
+        }
     } else {
         hash += `&chatfile=${props.vod.webpath}/${props.vod.basename}_chat.json`;
     }
 
-    hash += `&chapters=${props.vod.chapters?.map((c) => `${c.offset}:${encodeURIComponent(c.title.replaceAll(":", "").replaceAll(";", ""))}`).join(";")}`;
+    hash += `&chapters=${props.vod.chapters
+        ?.map((c) => `${syncToVideo ? c.video_offset : c.offset}:${encodeURIComponent(c.title.replaceAll(":", "").replaceAll(";", ""))}`)
+        .join(";")}`;
 
     // url.searchParams.set("offset", this.playerSettings.offset.toString());
     // window.open(url.toString(), "_blank");

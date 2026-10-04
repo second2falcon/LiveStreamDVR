@@ -156,12 +156,12 @@
                 <ul class="list">
                     <li v-for="(chapter, i) in vodData.chapters" :key="i">
                         <a
-                            v-if="chapter.offset !== undefined && chapter.duration !== undefined"
-                            @click="setCutpoints(chapter.offset || 0, chapter.duration || 0)"
+                            v-if="chapter.video_offset !== undefined && chapter.video_duration !== undefined"
+                            @click="setCutpoints(chapter.video_offset || 0, chapter.video_duration || 0)"
                         >
                             <div class="chapter-time">
-                                {{ humanDuration(chapter.offset) }} - {{ humanDuration(chapter.offset + chapter.duration) }} ({{
-                                    humanDuration(chapter.duration)
+                                {{ humanDuration(chapter.video_offset) }} - {{ humanDuration(chapter.video_offset + chapter.video_duration) }} ({{
+                                    humanDuration(chapter.video_duration)
                                 }})
                             </div>
                             <div class="chapter-game">
@@ -479,8 +479,8 @@ function timelineMouseMove(event: MouseEvent): void {
 
     if (vodData.value) {
         const idx = vodData.value.chapters.findIndex((chapter, i) => {
-            const o = i == 0 ? 0 : chapter.offset || 0;
-            return chapter.offset && chapter.duration && seconds >= o && seconds < o + chapter.duration;
+            const o = i == 0 ? 0 : chapter.video_offset || 0;
+            return chapter.video_offset && chapter.video_duration && seconds >= o && seconds < o + chapter.video_duration;
         });
         if (idx !== -1) {
             currentChapterHoverIndex.value = idx;
@@ -619,7 +619,7 @@ function submitForm(event: Event): void {
 
 function chapterWidth(chapter: BaseVODChapter): number {
     // const chapterOffset = chapter.offset || 0;
-    const chapterDuration = chapter.duration || 0;
+    const chapterDuration = chapter.video_duration || 0;
     const width = (chapterDuration / videoDuration.value) * 100;
     return width;
 }
@@ -697,8 +697,8 @@ watch(
 );
 
 function chapterStyle(index: number, chapter: BaseVODChapter): HTMLAttributes["style"] {
-    const chapterOffset = index == 0 ? 0 : chapter.offset || 0;
-    const chapterDuration = chapter.duration || 0;
+    const chapterOffset = index == 0 ? 0 : chapter.video_offset || 0;
+    const chapterDuration = chapter.video_duration || 0;
     const left = (chapterOffset / videoDuration.value) * 100;
     // cap width at duration
     const width = Math.min((chapterDuration / videoDuration.value) * 100, 100 - left);
