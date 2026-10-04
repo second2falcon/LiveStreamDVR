@@ -69,6 +69,10 @@ export default class BaseVOD {
 
     viewers: VodViewerEntry[] = [];
     stream_pauses: StreamPause[] = [];
+    /** The stream pauses were filled with black video during conversion */
+    stream_pauses_padded = false;
+    /** Chat and chapter times need to be mapped to the captured video because of stream pauses */
+    needs_video_sync = false;
 
     get current_chapter(): BaseVODChapter | undefined {
         if (this.chapters.length > 0) {
@@ -145,6 +149,8 @@ export default class BaseVOD {
         vod.stream_pauses = apiResponse.stream_pauses
             ? apiResponse.stream_pauses.map((entry) => ({ start: new Date(entry.start), end: new Date(entry.end) }))
             : [];
+        vod.stream_pauses_padded = apiResponse.stream_pauses_padded ?? false;
+        vod.needs_video_sync = apiResponse.needs_video_sync ?? false;
 
         return vod;
 

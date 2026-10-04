@@ -107,6 +107,7 @@ router.post("/vod/:uuid/save", AuthAdmin, Vod.ArchiveVod);
 router.post("/vod/:uuid/bookmark", AuthAdmin, Vod.AddBookmark);
 router.delete("/vod/:uuid/bookmark", AuthAdmin, Vod.RemoveBookmark);
 router.get("/vod/:uuid/sync", AuthAdmin, Vod.GetSync);
+router.get("/vod/:uuid/synced.chatdump", AuthGuest, Vod.GetVideoChatdump);
 router.post("/vod/:uuid/rename", AuthAdmin, Vod.RenameVod);
 router.post("/vod/:uuid/fix_issues", AuthAdmin, Vod.FixIssues);
 router.post("/vod/:uuid/refresh_metadata", AuthAdmin, Vod.RefreshVodMetadata);

@@ -704,6 +704,13 @@ export const settingsFields = createSettingsFields({
         type: "boolean",
         default: false,
     },
+    "video.pad_stream_pauses": {
+        group: "Video",
+        text: "Fill ad breaks with black video",
+        type: "boolean",
+        default: false,
+        help: "When converting a capture, insert black, silent video where streamlink filtered out ad breaks, so the video is as long as the stream and chat and chapters stay in sync. Only a short black clip is encoded, the capture itself is still copied. Falls back to a normal conversion if it fails.",
+    },
     create_video_chapters: {
         group: "Video",
         text: "Create video chapters",

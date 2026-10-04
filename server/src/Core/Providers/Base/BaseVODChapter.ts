@@ -1,6 +1,8 @@
 import type { VODTypes } from "@/Core/LiveStreamDVR";
 import { LiveStreamDVR } from "@/Core/LiveStreamDVR";
 import { LOGLEVEL, log } from "@/Core/Log";
+import type { PauseInterval } from "@/Helpers/StreamPauses";
+import { streamTimeToVideoTime } from "@/Helpers/StreamPauses";
 import type { BaseVODChapterJSON } from "@/Storage/JSON";
 import type { ApiVodBaseChapter } from "@common/Api/Client";
 import type { Providers } from "@common/Defs";
@@ -13,8 +15,14 @@ export class BaseVODChapter {
      */
     public started_at!: Date;
 
+    /** Seconds since the stream started */
     public offset?: number;
     public duration?: number;
+
+    /** Position in the captured video, corrected for stream pauses (ad breaks) */
+    public video_offset?: number;
+    /** Duration in the captured video, corrected for stream pauses (ad breaks) */
+    public video_duration?: number;
 
     public title = "";
 
@@ -28,7 +36,8 @@ export class BaseVODChapter {
     public calculateDurationAndOffset(
         vod_started_at: Date,
         vod_ended_at: Date | undefined,
-        next_chapter_started_at: Date | undefined
+        next_chapter_started_at: Date | undefined,
+        pause_intervals: PauseInterval[] = []
     ): void {
         if (vod_started_at.getTime() > this.started_at.getTime()) {
             // this chapter started before the vod started
@@ -76,6 +85,20 @@ export class BaseVODChapter {
                 (this.started_at.getTime() - vod_started_at.getTime()) / 1000;
         }
 
+        if (this.offset !== undefined) {
+            this.video_offset = streamTimeToVideoTime(
+                this.offset,
+                pause_intervals
+            );
+            this.video_duration =
+                this.duration !== undefined
+                    ? streamTimeToVideoTime(
+                          this.offset + this.duration,
+                          pause_intervals
+                      ) - this.video_offset
+                    : undefined;
+        }
+
         // console.debug(`Calculated duration and offset for chapter: ${this.title}`, this.offset, this.duration);
     }
 
@@ -91,6 +114,8 @@ export class BaseVODChapter {
 
             offset: this.offset || 0,
             duration: this.duration || 0,
+            video_offset: this.video_offset ?? this.offset ?? 0,
+            video_duration: this.video_duration ?? this.duration ?? 0,
 
             started_at: this.started_at.toISOString(),
 

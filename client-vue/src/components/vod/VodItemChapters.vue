@@ -42,8 +42,8 @@
                             }"
                         >
                             <!-- start timestamp -->
-                            <td data-contents="offset" :title="formatDate(chapter.started_at)">
-                                {{ chapter.offset !== undefined ? humanDuration(chapter.offset) : "Unknown" }}
+                            <td data-contents="offset" :title="chapterOffsetTitle(chapter)">
+                                {{ chapter.video_offset !== undefined ? humanDuration(chapter.video_offset) : "Unknown" }}
                             </td>
 
                             <!-- start time -->
@@ -58,15 +58,15 @@
 
                             <!-- end time -->
                             <td v-if="showAdvanced" data-contents="ended_at">
-                                <template v-if="chapter.offset !== undefined && chapter.duration !== undefined">
-                                    {{ humanDuration(chapter.offset + chapter.duration) }}
+                                <template v-if="chapter.video_offset !== undefined && chapter.video_duration !== undefined">
+                                    {{ humanDuration(chapter.video_offset + chapter.video_duration) }}
                                 </template>
                             </td>
 
                             <!-- duration -->
                             <td data-contents="duration">
-                                <template v-if="chapter.duration">
-                                    {{ niceDuration(chapter.duration) }}
+                                <template v-if="chapter.video_duration">
+                                    {{ niceDuration(chapter.video_duration) }}
                                 </template>
                                 <template v-else>
                                     <duration-display :start-date="chapter.started_at.toISOString()" output-style="human" />
@@ -89,7 +89,7 @@
                                         <a
                                             class="px-1"
                                             target="_blank"
-                                            :href="playerLink(chapter.offset)"
+                                            :href="playerLink(chapter.video_offset)"
                                             title="Open in player"
                                             :class="{ 'is-spoiler': store.clientCfg('hideChapterTitlesAndGames') }"
                                         >
@@ -104,7 +104,11 @@
                                             :to="{
                                                 name: 'Editor',
                                                 params: { uuid: vod.uuid },
-                                                query: { start: chapter.offset, end: (chapter.offset || 0) + (chapter.duration || 0), chapter: chapterIndex },
+                                                query: {
+                                                    start: chapter.video_offset,
+                                                    end: (chapter.video_offset || 0) + (chapter.video_duration || 0),
+                                                    chapter: chapterIndex,
+                                                },
                                             }"
                                         >
                                             <span class="icon"><font-awesome-icon icon="cut" /></span>
@@ -233,8 +237,20 @@ const hasViewerCount = computed(() => {
 function playerLink(offset = 0, chatdownload = false): string {
     if (!props.vod || !store.config) return "#";
     const video_path = `${props.vod.webpath}/${props.vod.basename}.mp4`;
-    const chat_path = `${props.vod.webpath}/${props.vod.basename}.${chatdownload ? "chat" : "chatdump"}`;
-    return `${store.cfg<string>("basepath", "")}/vodplayer#source=file_http&video_path=${video_path}&chatfile=${chat_path}&offset=${offset}`;
+    let chat_path = `${props.vod.webpath}/${props.vod.basename}.${chatdownload ? "chat" : "chatdump"}`;
+    if (!chatdownload && props.vod.needs_video_sync) {
+        // stream pauses were cut out of the video, use the chat dump synced to it
+        chat_path = `${store.cfg<string>("basepath", "")}/api/v0/vod/${props.vod.uuid}/synced.chatdump`;
+    }
+    return `${store.cfg<string>("basepath", "")}/vodplayer#source=file_http&video_path=${video_path}&chatfile=${chat_path}&t=${Math.floor(offset)}`;
+}
+
+function chapterOffsetTitle(chapter: ChapterTypes): string {
+    let title = formatDate(chapter.started_at);
+    if (chapter.offset !== undefined && chapter.video_offset !== undefined && Math.round(chapter.offset) !== Math.round(chapter.video_offset)) {
+        title += ` (${humanDuration(chapter.offset)} into the stream, ad breaks are cut out of the video)`;
+    }
+    return title;
 }
 
 function twitchVideoLink(video_id: string): string {

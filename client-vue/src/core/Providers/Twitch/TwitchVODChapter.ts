@@ -19,6 +19,8 @@ export class TwitchVODChapter extends BaseVODChapter {
         chapter.started_at = new Date(apiResponse.started_at);
         chapter.offset = apiResponse.offset;
         chapter.duration = apiResponse.duration;
+        chapter.video_offset = apiResponse.video_offset ?? apiResponse.offset;
+        chapter.video_duration = apiResponse.video_duration ?? apiResponse.duration;
         // chapter.strings = apiResponse.strings;
         chapter.game_id = apiResponse.game_id;
         chapter.title = apiResponse.title;

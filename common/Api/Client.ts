@@ -23,7 +23,12 @@ export interface ApiVodBaseChapter {
     duration: number;
     started_at: string;
     // datetime: PHPDateTimeJSON;
+    /** Seconds since the stream started */
     offset: number;
+    /** Position in the captured video, corrected for stream pauses (ad breaks) */
+    video_offset: number;
+    /** Duration in the captured video, corrected for stream pauses (ad breaks) */
+    video_duration: number;
 }
 
 export interface ApiVodTwitchChapter extends ApiVodBaseChapter {
@@ -120,6 +125,10 @@ export interface ApiBaseVod {
 
     viewers: { amount: number; timestamp: string }[];
     stream_pauses: { start: string; end: string }[];
+    /** The stream pauses were filled with black video during conversion */
+    stream_pauses_padded: boolean;
+    /** Chat and chapter times need to be mapped to the captured video because of stream pauses */
+    needs_video_sync: boolean;
 
     bookmarks: VODBookmark[];
 }
