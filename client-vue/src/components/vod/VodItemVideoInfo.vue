@@ -102,9 +102,9 @@
                     >
                         {{
                             t("vod.video-info.duration-difference", {
-                                full: humanDuration(vod.video_metadata?.full_duration || 0),
+                                full: humanDuration((vod.video_metadata?.duration || 0) + (vod.stream_pauses_padded ? 0 : fileAndVideoDurationDifference)),
                                 diff: humanDuration(fileAndVideoDurationDifference),
-                                dur: humanDuration(vod.video_metadata?.duration || 0),
+                                dur: humanDuration((vod.video_metadata?.duration || 0) - (vod.stream_pauses_padded ? fileAndVideoDurationDifference : 0)),
                             })
                         }}
                     </div>
@@ -311,7 +311,8 @@ const { t } = useI18n();
 
 const fileAndVideoDurationDifference = computed((): number | null => {
     if (!props.vod.video_metadata || !props.vod.video_metadata.full_duration) return null;
-    return props.vod.video_metadata.full_duration - props.vod.video_metadata.duration;
+    // ad breaks cut out of the capture (or filled with black) don't show up in the file durations, count the recorded stream pauses too
+    return Math.max(props.vod.video_metadata.full_duration - props.vod.video_metadata.duration, props.vod.totalPausedTime / 1000);
 });
 
 const videoAndTwitchDurationDifference = computed((): number | null => {
