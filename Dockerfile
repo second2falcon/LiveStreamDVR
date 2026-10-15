@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y \
 # WORKDIR /usr/local/share/twitchautomator
 COPY ./Pipfile ./Pipfile.lock ./requirements.txt ./binaries.txt /usr/local/share/twitchautomator/
 # install pipenv globally
-RUN pip install pipenv --break-system-packages && pip cache purge
+RUN pip install "pipenv==2026.9.1" --break-system-packages --ignore-installed && pip cache purge
 # switch to node user to install pipenv dependencies
 USER node 
 ENV PATH="${PATH}:/home/node/.local/bin"
