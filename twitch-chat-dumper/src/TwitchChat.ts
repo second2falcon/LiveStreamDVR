@@ -138,6 +138,9 @@ export class TwitchChat extends EventEmitter {
     public dumpStream: fs.WriteStream | undefined;
     public dumpFilename: string | undefined;
     public dumpStart: Date | undefined;
+    /** close() was called, don't reconnect */
+    public closing = false;
+    public reconnectTimer: NodeJS.Timeout | undefined;
 
     public static readonly liveTerms = ["live", "hi youtube", "hi yt", "pog", "pogchamp"];
     public lastLiveEmit: Date | undefined;
@@ -198,8 +201,19 @@ export class TwitchChat extends EventEmitter {
                 this.handleMessage(message.toString());
             });
         };
+        this.ws.onerror = (ev) => {
+            console.log("Connection error", ev.message);
+        };
         this.ws.onclose = (ev) => {
             console.log("Connection closed", ev.code, ev.reason);
+            if (!this.closing) {
+                // Twitch drops IRC connections now and then (RECONNECT, maintenance, network),
+                // keep dumping on a new connection instead of ending the dump mid-stream
+                // ponytail: fixed delay, add backoff if Twitch starts rejecting reconnects
+                console.log("Reconnecting in 5 seconds");
+                this.reconnectTimer = setTimeout(() => this.connect(), 5000);
+                return;
+            }
             this.stopDump();
             this.emit("close");
         };
@@ -397,6 +411,8 @@ export class TwitchChat extends EventEmitter {
     }
 
     public close() {
+        this.closing = true;
+        clearTimeout(this.reconnectTimer);
         this.ws.close();
         if (this.dumpStream) {
             this.stopDump();
